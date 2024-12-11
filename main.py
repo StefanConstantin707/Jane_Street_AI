@@ -16,7 +16,7 @@ from sklearn.metrics import mean_squared_error
 from Models.MiniAttention import FullTransformer
 from Models.SimpleNN import SimpleNN
 from Utillity.LossFunctions import r2_score
-from dataHandler import create_dataloaders, load_data, split_data, load_data_symbol
+from dataHandler import create_dataloaders, load_data, split_data, load_data_symbol, create_seq_dataloaders
 
 
 def train_model(model, loader, optimizer, loss_function, device):
@@ -109,7 +109,11 @@ def evaluate_model(model, loader, device):
     return mse, r2
 
 def main():
-    model = SimpleNN(79, 64, 9, 5, use_noise=False, dropout_prob=0.3)
+    # model = SimpleNN(79, 64, 9, 5, use_noise=False, dropout_prob=0.3)
+
+    model = FullTransformer(dim_in=79, dim_attn=64, attention_depth=2, mlp_depth=2, dim_out=9, heads=8, rotary_emb=True,
+                            dropout=0.3)
+
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total number of parameters: {total_params}")
 
@@ -118,8 +122,8 @@ def main():
     train_X, train_Y, train_weights, val_X, val_Y, val_weights, test_X, test_Y, test_weights = (
         split_data(X, Y, weights, 0.8, 0.1, 0.1))
 
-    train_loader, val_loader, test_loader = create_dataloaders(train_X, train_Y, train_weights, val_X, val_Y,
-                                                               val_weights, test_X, test_Y, test_weights, shuffle=False, batch_size=4096)
+    train_loader, val_loader, test_loader = create_seq_dataloaders(train_X, train_Y, train_weights, val_X, val_Y,
+                                                               val_weights, test_X, test_Y, test_weights, shuffle=False, batch_size=1024, seq_len=60)
 
     print("Data Loaded!")
 
@@ -156,7 +160,4 @@ def main():
 
 
 if __name__ == '__main__':
-    model = FullTransformer(dim_in=79, dim_attn=64, attention_depth=3, mlp_depth=2, dim_out=9, heads=8, rotary_emb=True, dropout=0.3)
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total number of parameters: {total_params}")
     main()

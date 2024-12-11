@@ -1,6 +1,6 @@
 import torch
 import polars as pl
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset, DataLoader, Dataset
 
 from means_and_stds import means, stds
 
@@ -75,7 +75,6 @@ def load_data_symbol(symbol_id):
 
     return X, Y, weights
 
-
 def split_data(X, Y, weights, train_percentage, val_percentage, test_percentage):
     nu_train_rows = int(len(X) * train_percentage)
     nu_val_rows = int(len(X) * val_percentage)
@@ -110,3 +109,38 @@ def create_dataloaders(train_X, train_Y, train_weights, val_X, val_Y, val_weight
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
 
     return train_loader, val_loader, test_loader
+
+def create_seq_dataloaders(train_X, train_Y, train_weights, val_X, val_Y, val_weights, test_X, test_Y, test_weights, batch_size, shuffle, seq_len):
+    train_dataset = SequenceDataset(train_X, train_Y, train_weights, seq_len)
+    val_dataset = SequenceDataset(val_X, val_Y, val_weights, seq_len)
+    test_dataset = SequenceDataset(test_X, test_Y, test_weights, seq_len)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=shuffle)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
+
+    return train_loader, val_loader, test_loader
+
+class SequenceDataset(Dataset):
+    def __init__(self, data_X, data_Y, data_weights, seq_len):
+        self.data_X = data_X
+        self.data_Y = data_Y
+        self.data_weights = data_weights
+
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.data_Y)
+
+    def __getitem__(self, idx):
+        start = max(idx - self.seq_len + 1, 0)
+
+        X = self.data_X[start:idx+1]
+        Y = self.data_Y[idx]
+        weights = self.data_weights[idx]
+
+        if idx < self.seq_len:
+            zeros_X = torch.zeros((self.seq_len - idx - 1, X.shape[1]), dtype=torch.float32)
+            X = torch.cat((zeros_X, X), dim=0)
+
+        return X, Y, weights

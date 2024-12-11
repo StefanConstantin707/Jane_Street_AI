@@ -61,7 +61,7 @@ class SelfAttention(nn.Module):
         self.to_k = nn.Linear(dim_in, dim_qk, bias = False)
         self.to_v = nn.Linear(dim_in, dim_v, bias = False)
 
-        self.rotary_emb = RotationalPositionalEncoding1D(dim_qk) if rotary_emb else nn.Identity()
+        self.rotary_emb = RotationalPositionalEncoding1D(dim_qk//heads) if rotary_emb else nn.Identity()
 
         self.to_out = nn.Sequential(
             nn.Linear(dim_v, dim_out),
@@ -134,13 +134,13 @@ class FullTransformer(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim_attn))
         self.dropout = nn.Dropout(dropout)
 
-        self.transformer = Transformer(dim_in=dim_in, dim_qk=dim_attn, dim_v=dim_attn, attention_depth=attention_depth, mlp_depth=mlp_depth, heads=heads, mlp_dim=dim_attn, rotary_emb=rotary_emb, dropout=dropout)
+        self.transformer = Transformer(dim_in=dim_attn, dim_qk=dim_attn, dim_v=dim_attn, attention_depth=attention_depth, mlp_depth=mlp_depth, heads=heads, mlp_dim=dim_attn, rotary_emb=rotary_emb, dropout=dropout)
 
         self.to_responders = nn.Linear(dim_attn, dim_out)
 
-    def forward(self, X):
+    def forward(self, x):
         # N, Seq_L, dim_in -> N, Seq_L, dim_attn
-        x = self.to_input(X)
+        x = self.to_input(x)
         b, s, _ = x.shape
 
         # 1, 1, dim_attn -> N, 1, dim_attn
@@ -160,3 +160,30 @@ class FullTransformer(nn.Module):
         x = self.to_responders(x).squeeze(1)
 
         return x
+
+    def save(self, path=".\\savedModels\\attention_nn.pt"):
+        """
+        Save the model state dictionary to a file.
+
+        Parameters:
+        - path: The file path where the model will be saved. Default is '..\\savedModels\\simple_nn.pt'.
+        """
+        torch.save(self.state_dict(), path)
+        print(f"Model saved to {path}")
+
+    @classmethod
+    def load(cls, path, *args, **kwargs):
+        """
+        Load the model state dictionary from a file and create a new model instance.
+
+        Parameters:
+        - path: The file path from which to load the model.
+        - *args, **kwargs: Additional arguments for the model's constructor.
+
+        Returns:
+        - An instance of SimpleNN with the loaded weights.
+        """
+        model = cls(*args, **kwargs)
+        model.load_state_dict(torch.load(path))
+        print(f"Model loaded from {path}")
+        return model
