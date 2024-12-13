@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+
 
 def r2_score(y_true, y_pred, weights):
     """
@@ -12,8 +14,15 @@ def r2_score(y_true, y_pred, weights):
     Returns:
     float: The weighted zero-mean R-squared score.
     """
-    numerator = np.sum(weights * (y_true - y_pred)**2)
-    denominator = np.sum(weights * y_true**2)
+    numerator = torch.sum(weights * (y_true - y_pred)**2)
+    denominator = torch.sum(weights * y_true**2)
 
     r2_score = 1 - numerator / denominator
+    return r2_score
+
+def r2_loss(y_true, y_pred, weights):
+    numerator = torch.sum(weights * (y_true - y_pred)**2)
+    denominator = torch.sum(weights * y_true**2)
+
+    r2_score = numerator / denominator
     return r2_score
