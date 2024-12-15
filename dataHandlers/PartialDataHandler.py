@@ -1,121 +1,191 @@
 import torch
 import polars as pl
-from torch.utils.data import TensorDataset, DataLoader, Dataset
 import numpy as np
+import numba
+from sympy.stats.sampling.sample_numpy import numpy
+
+from torch.utils.data import Dataset
 
 from dataHandlers.DataTransformation import fill_null_values
 
+class PartialDataset(Dataset):
+    def __init__(self, data_type, path, start_date, end_date, data_percentage, in_size, out_size, device):
+        self.data_type = data_type
+        self.data_percentage = data_percentage
+        if self.data_type != 'train' and self.data_type != 'eval':
+            raise ValueError('Type must be either train or eval')
 
-def load_partial_data(start_date=1400):
-    jane_street_real_time_market_data_forecasting_path = './jane-street-real-time-market-data-forecasting'
+        train_data = self._load_partial_data(path, start_date, end_date)
+        self.data = self._extract_train_data(train_data)
 
-    all_train_data = pl.scan_parquet(f"{jane_street_real_time_market_data_forecasting_path}/train.parquet")
+        self.nu_rows = self.data.shape[0]
+        self.nu_cols = self.data.shape[1]
 
-    train_data = all_train_data.filter(pl.col("date_id") >= start_date).collect()
-
-    return train_data
-
-def create_prev_time_id_mapping(train_data):
-    time_and_symbol_names = ["date_id", "time_id", "symbol_id"]
-    nu_dates = train_data.select(pl.col("date_id").unique()).collect().to_numpy().max() + 1
-    nu_time_ids = train_data.select(pl.col("time_id").unique()).collect().to_numpy().max() + 1
-    nu_symbols = train_data.select(pl.col("symbol_id").unique()).collect().to_numpy().max() + 1
-
-    print(f'nu_dates: {nu_dates}, nu_time_ids: {nu_time_ids}, nu_symbols: {nu_symbols}')
-
-    time_and_symbol_data = train_data.select(time_and_symbol_names).collect().to_numpy()
-
-    nu_rows, _ = time_and_symbol_data.shape
-
-    prev_time_id_mapping = np.zeros((nu_symbols, nu_dates, nu_time_ids), dtype=np.int32)
-
-    prev_symbol_idx = np.ones((nu_symbols,), dtype=np.int32) * (-1)
-
-    for row in range(nu_rows):
-        date = time_and_symbol_data[row, 0]
-        time = time_and_symbol_data[row, 1]
-        symbol = time_and_symbol_data[row, 2]
-
-        prev_time_id_mapping[symbol, date, time] = prev_symbol_idx[symbol]
-        prev_symbol_idx[symbol] = row
-
-    return prev_time_id_mapping
-
-def extract_train_data(train_data: pl.LazyFrame) -> [np.array]:
-    feature_features = [f"feature_{i:02d}" for i in range(79)]
-    responders_features = [f"responder_{i}" for i in range(9)]
-    symbol_feature = ['symbol_id']
-    train_features = feature_features + responders_features + symbol_feature
-
-    temporal_features = ['date_id', 'time_id']
-
-    weight_feature = ['weight']
-
-    data_XY = train_data.select(train_features)
-    data_time =  train_data.select(temporal_features)
-    data_weights = train_data.select(weight_feature)
-
-    data_XY = fill_null_values(data_XY)
-
-    data_XY = data_XY.collect().to_numpy()
-    data_time = data_time.collect().to_numpy()
-    data_weights = data_weights.collect().to_numpy()
-
-    print(f'data_XY shape: {data_XY.shape}; data_time shape: {data_time.shape}; data_weights shape: {data_weights.shape}')
-
-    return data_XY, data_time, data_weights
-
-def split_data_train_eval(XY, time, weights, train_percentage, eval_percentage):
-    nu_rows = XY.shape[0]
-    nu_train_rows = nu_rows * train_percentage
-    nu_eval_rows = nu_rows * eval_percentage
-
-    train_XY, eval_XY = XY[:nu_train_rows], XY[nu_train_rows:]
-    train_time, eval_time = time[:nu_train_rows], time[nu_train_rows:]
-    train_weights, eval_weights = weights[:nu_train_rows], weights[nu_train_rows:]
-
-    return train_XY, train_time, train_weights, eval_XY, eval_time, eval_weights
-
-def create_seq_dataloaders(train_XY, train_time, train_weights, eval_XY, eval_time, eval_weights, batch_size, shuffle, seq_len):
-    train_dataset = SequenceDataset(train_XY, train_time, train_weights, seq_len)
-    eval_dataset = SequenceDataset(eval_XY, eval_time, eval_weights, seq_len)
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
-    eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
-
-    return train_loader, eval_loader
-
-class SequenceDataset(Dataset):
-    def __init__(self, data_XY, data_time, data_weights, seq_len, out_size, device):
-        self.data_XY = data_XY
-        self.data_time = data_time
-        self.data_weights = data_weights
-
-        self.seq_len = seq_len
+        self.out_size = out_size
+        self.nu_features = in_size
         self.device = device
 
-        self.nu_features = data_XY.shape[1]
-        self.out_size = out_size
+    def _load_partial_data(self, jane_street_real_time_market_data_forecasting_path, start_date=1400, end_date=1699):
+
+        all_train_data = pl.scan_parquet(f"{jane_street_real_time_market_data_forecasting_path}jane-street-real-time-market-data-forecasting/train.parquet")
+
+        train_data = all_train_data.filter((pl.col("date_id") >= start_date) & (pl.col("date_id") < end_date))
+
+        return train_data
+
+    def _extract_train_data(self, train_data: pl.LazyFrame) -> [np.array]:
+        # Generate features
+        feature_features = [f"feature_{i:02d}" for i in range(79)]
+        responders_features = [f"responder_{i}" for i in range(9)]
+        symbol_feature = ['symbol_id']
+        temporal_features = ['date_id', 'time_id']
+        weight_feature = ['weight']
+
+        # Combine features
+        required_features = feature_features + responders_features + symbol_feature + temporal_features + weight_feature
+
+        # Create a dictionary mapping features to their indices
+        feature_index_mapping = {feature: index for index, feature in enumerate(required_features)}
+
+        required_data = train_data.select(required_features)
+        required_data = fill_null_values(required_data)
+
+        data = torch.tensor(required_data.collect().to_numpy())
+
+        print(f'Numpy data created with shape: {data.shape}')
+        print(f'Numpy dataframe columns and indexes:{feature_index_mapping}')
+
+        return data
+
+    def get_features(self, idx=None):
+        if idx is None:
+            return self.data[:, :79]
+        return self.data[idx, :79]
+
+    def get_responders(self, idx=None):
+        if idx is None:
+            return self.data[:, 79:88]
+        return self.data[idx, 79:88]
+
+    def get_symbols(self, idx=None):
+        if idx is None:
+            return self.data[:, 88].to(torch.int32)
+        return self.data[idx, 88].to(torch.int32)
+
+    def get_dates(self, idx=None):
+        if idx is None:
+            return self.data[:, 89].to(torch.int32)
+        return self.data[idx, 89].to(torch.int32)
+
+    def get_times(self, idx=None):
+        if idx is None:
+            return self.data[:, 90].to(torch.int32)
+        return self.data[idx, 90].to(torch.int32)
+
+    def get_weights(self, idx=None):
+        if idx is None:
+            return self.data[:, 91]
+        return self.data[idx, 91]
+
+    def get_y(self, idx=None):
+        return self.get_responders(idx=idx)
+
+    def get_x(self, idx=None):
+        if idx is None:
+            return self.data[:, :80]
+        return self.data[idx, :80]
+
+    def get_temporal(self, idx=None):
+        if idx is None:
+            return self.data[:, 89:91]
+        return self.data[idx, 89:91]
+    
+class SingleRowDataset(PartialDataset):
+    def __init__(self, data_type, path, start_date, end_date, data_percentage, in_size, out_size, device):
+        super().__init__(data_type, path, start_date, end_date, data_percentage, in_size, out_size, device)
+
+        self.x_indexes = torch.cat((torch.arange(0, 80), torch.tensor([88])), dim=0)
+
+    # def get_x(self, idx=None):
+    #     if idx is None:
+    #         return self.data[:, self.x_indexes]
+    #     return self.data[idx, self.x_indexes]
 
     def __len__(self):
-        return self.data_weights.shape[0]
+        return self.nu_rows
+
+    def __getitem__(self, idx):
+        # nu_features,
+        X = self.get_x(idx)
+        # out_size,
+        Y = self.get_y(idx)
+        # 2,
+        temporal = self.get_temporal(idx)
+        # 1,
+        weights = self.get_weights(idx).unsqueeze(0)
+        # 1,
+        symbol = self.get_symbols(idx)
+
+        return X, Y, temporal, weights, symbol
+
+class SequentialDualDataset(PartialDataset):
+    def __init__(self, data_type, path, start_date, end_date, data_percentage, in_size, out_size, device, seq_len):
+        super().__init__(data_type, path, start_date, end_date, data_percentage, in_size, out_size, device)
+
+        self.prev_time_id_mapping = self._create_prev_time_id_mapping()
+
+        self.seq_len = seq_len
+
+    def _create_prev_time_id_mapping(self):
+        @numba.njit
+        def _create_mapping(array, prev__mapping, prev_symbol):
+            for row in range(array.shape[0]):
+                symbol = array[row, 0]
+                date = array[row, 1]
+                time = array[row, 2]
+
+                prev__mapping[symbol, date, time] = prev_symbol[symbol]
+                prev_symbol[symbol] = row
+            return prev__mapping
+
+        nu_dates = self.get_dates().max() + 1
+        nu_time_ids = self.get_times().max() + 1
+        nu_symbols = self.get_symbols().max() + 1
+
+        print(f'nu_dates: {nu_dates}, nu_time_ids: {nu_time_ids}, nu_symbols: {nu_symbols}')
+
+        prev_time_id_mapping = np.zeros((nu_symbols, nu_dates, nu_time_ids), dtype=np.int32)
+        prev_symbol_idx = np.ones((nu_symbols,), dtype=np.int32) * (-1)
+
+        prev_time_id_mapping = _create_mapping(self.data[:, 88:91].to(torch.int32).numpy(), prev_time_id_mapping,
+                                               prev_symbol_idx)
+        print("Mapping Created")
+
+        return prev_time_id_mapping
+
+    def __len__(self):
+        return self.nu_rows
 
     def __getitem__(self, idx):
         # seq_len, nu_features
-        X = torch.zeros((self.seq_len, self.nu_features), dtype=torch.float32, device=self.device)
+        X = torch.zeros((self.seq_len, self.nu_features), dtype=torch.float32)
         # out_size,
-        Y = self.data_XY[idx, -self.out_size-1:-1]
+        Y = self.get_y(idx)
         # 2,
-        temporal = self.data_time[idx].to(self.device)
+        temporal = self.get_temporal(idx)
         # 1,
-        weights = self.data_weights[idx].to(self.device)
+        weights = self.get_weights(idx)
         # 1,
-        symbol = self.data_XY[idx, -1].to(self.device)
+        symbol = self.get_symbols(idx)
 
-        date = temporal[1]
-        time = temporal[0]
+        X[-1] = self.get_x(idx).clone()
+        X[-1, 79:88] = torch.zeros((self.out_size,))
 
-        X[1] = self.data_XY[idx]
-        prev_time_id =
+        date = temporal[0]
+        time = temporal[1]
+
+        if time != 0:
+            prev_idx = self.prev_time_id_mapping[symbol, date, time]
+            X[-2] = self.get_x(prev_idx).clone()
 
         return X, Y, weights, time

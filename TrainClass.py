@@ -1,10 +1,11 @@
 import torch
+from torch import no_grad
 
-from Utillity.LossFunctions import r2_loss, r2_score
+from Utillity.LossFunctions import r2_loss, r2_score, weighted_mse
 
 
-class TrainClass:
-    def __init__(self, model, loader, optimizer, loss_function, device, mini_epoch_size, out_size, batch_size, miniEval):
+class GeneralTrainEvalClass:
+    def __init__(self, model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size):
         super().__init__()
 
         self.model = model
@@ -15,224 +16,127 @@ class TrainClass:
         self.loss_function = loss_function
         self.device = device
 
-        self.total_iterations = len(self.loader)
+        self.total_iterations = 0
 
         self.batch_size = batch_size
+        self.mini_epoch_size = mini_epoch_size
         self.out_size = out_size
 
         self.epoch_loss = 0
         self.mini_epoch_loss = 0
-        self.mini_epoch_size = mini_epoch_size
 
-        self.all_pred = torch.zeros((self.total_iterations, batch_size, out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((self.total_iterations, batch_size, out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((self.total_iterations, batch_size, 1), dtype=torch.float32)
+        self.all_pred = []
+        self.all_targets = []
+        self.all_weights = []
 
         self.iteration = 0
 
-        self.miniEval = miniEval
+    def _reset_cache(self):
+        self.all_pred = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
+        self.all_targets = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
+        self.all_weights = torch.zeros((self.total_iterations, self.batch_size, 1), dtype=torch.float32)
+        self.epoch_loss = 0
+        self.mini_epoch_loss = 0
+        self.iteration = 0
+
+    def _update_cache(self, Y_batch, weights_batch, loss, outputs):
+        self.epoch_loss += loss.item()
+        self.mini_epoch_loss += loss.item()
+
+        self.all_pred[self.iteration - 1, :outputs.shape[0]] = outputs
+        self.all_targets[self.iteration - 1, :outputs.shape[0]] = Y_batch
+        self.all_weights[self.iteration - 1, :outputs.shape[0]] = weights_batch
+
+    def _log(self):
+        if self.iteration % self.mini_epoch_size == 0 or self.iteration == self.total_iterations:
+            nu_iterations_since_last_log = min(self.mini_epoch_size, ((self.iteration - 1) % self.mini_epoch_size) + 1)
+            print(
+                f"Iteration {self.iteration}/{self.total_iterations}, Average_Loss: {self.mini_epoch_loss / nu_iterations_since_last_log:.4f}")
+            self.mini_epoch_loss = 0
+
+    def _calculate_statistics(self):
+        avg_epoch_loss = self.loss_function(self.all_pred, self.all_targets, self.all_weights)
+        avg_epoch_r2 = r2_score(self.all_pred, self.all_targets, self.all_weights)
+        avg_epoch_mse = weighted_mse(self.all_pred, self.all_targets, self.all_weights)
+        avg_epoch_r2_responder_six = r2_score(self.all_pred[:, :, 6], self.all_targets[:, :, 6], self.all_weights.squeeze())
+
+        return avg_epoch_loss, avg_epoch_r2, avg_epoch_mse, avg_epoch_r2_responder_six
+
+class GeneralTrain(GeneralTrainEvalClass):
+    def __init__(self, model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size):
+        super().__init__(model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size)
+        self.total_iterations = len(self.loader)
 
     def step_epoch(self):
-        for X_batch, Y_batch, weights_batch, time in self.loader:
+        self.model.train()
+        self._reset_cache()
+        for X_batch, Y_batch, temporal_batch, weights_batch, symbol_batch in self.loader:
             self.iteration += 1
 
             # Move data to specified device (CPU or GPU)
             X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
+            temporal_batch = temporal_batch.to(self.device)
             weights_batch = weights_batch.to(self.device)
+            symbol_batch = symbol_batch.to(self.device)
 
-            # Reset gradient to 0
-            self.optimizer.zero_grad()
+            loss, outputs = self._run_model_with_optimization(X_batch, Y_batch, weights_batch)
+            self._update_cache(Y_batch, weights_batch, loss, outputs)
+            self._log()
 
-            # Forward pass
-            outputs = self.model(X_batch)
+        return self._calculate_statistics()
 
-            if outputs.shape != Y_batch.shape:
-                raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, Y_batch.shape))
+    def _run_model_with_optimization(self, X_batch, Y_batch, weights_batch):
+        # Forward pass
+        outputs = self.model(X_batch)
 
-            loss = r2_loss(y_true=Y_batch, y_pred=outputs, weights=weights_batch).mean()
+        if outputs.shape != Y_batch.shape:
+            raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, Y_batch.shape))
 
-            # Backpropagation
-            loss.backward()
+        loss = weighted_mse(y_true=Y_batch, y_pred=outputs, weights=weights_batch)
 
-            # Update model parameters
-            self.optimizer.step()
+        # Backpropagation
+        loss.backward()
 
-            # Accumulate total loss
-            self.epoch_loss += loss.item()
-            self.mini_epoch_loss += loss.item()
+        # Update model parameters
+        self.optimizer.step()
 
-            self.all_pred[self.iteration - 1, :outputs.shape[0]] = outputs
-            self.all_targets[self.iteration - 1, :outputs.shape[0]] = Y_batch
-            self.all_weights[self.iteration - 1, :outputs.shape[0]] = weights_batch
+        # Reset gradient to 0
+        self.optimizer.zero_grad()
 
-            # Log information every mini_epoch_size iterations
-            if self.iteration % self.mini_epoch_size == 0 or self.iteration == self.total_iterations:
-                eval_loss, eval_r2 = self.miniEval.step_eval()
-                print(f"Iteration {self.iteration}/{self.total_iterations}, Average_Loss: {self.mini_epoch_loss / min(self.mini_epoch_size, ((self.iteration - 1) % self.mini_epoch_size) + 1):.4f}, eval_loss {eval_loss:.4f}, eval_r2 {eval_r2:.4f}")
-                self.mini_epoch_loss = 0
+        return loss, outputs
 
-
-
-        # Compute overall metrics
-        avg_epoch_r2 = r2_score(self.all_targets, self.all_pred, self.all_weights)
-
-        avg_epoch_loss = self.epoch_loss / self.total_iterations
-
-        self.all_pred = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((self.total_iterations, self.batch_size, 1), dtype=torch.float32)
-        self.iteration = 0
-        self.epoch_loss = 0
-
-        return avg_epoch_loss, avg_epoch_r2
-
-
-class EvalClass:
-    def __init__(self, model, loader, optimizer, loss_function, device, mini_epoch_size, out_size, batch_size):
-        super().__init__()
-
-        self.model = model
-        self.model.eval()
-
-        self.loader = loader
-        self.loss_function = loss_function
-        self.device = device
-
-        self.batch_size = batch_size
-        self.out_size = out_size
-
+class GeneralEval(GeneralTrainEvalClass):
+    def __init__(self, model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size):
+        super().__init__(model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size)
         self.total_iterations = len(self.loader)
 
-        self.epoch_loss = 0
-
-        self.all_pred = torch.zeros((self.total_iterations, batch_size, out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((self.total_iterations, batch_size, out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((self.total_iterations, batch_size, 1), dtype=torch.float32)
-
-        self.iteration = 0
-
-        self.prev_pred = torch.zeros((batch_size, out_size), dtype=torch.float32)
-        self.prev_targets = torch.zeros((batch_size, out_size), dtype=torch.float32)
-
-    def step_eval(self):
-        for X_batch, Y_batch, weights_batch, time in self.loader:
-            self.iteration += 1
-
-            if time[:, 1] == 0:
-                self.prev_pred = self.prev_targets
-
-            X_batch[:, -1, -9:] = self.prev_pred
-
-            # Move data to specified device (CPU or GPU)
-            X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
-            weights_batch = weights_batch.to(self.device)
-
-            # Forward pass
-            outputs = self.model(X_batch)
-
-            self.prev_pred = outputs
-            self.prev_targets = Y_batch
-
-            if outputs.shape != Y_batch.shape:
-                raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, Y_batch.shape))
-
-            loss = r2_loss(y_true=Y_batch, y_pred=outputs, weights=weights_batch).mean()
-
-            # Accumulate total loss
-            self.epoch_loss += loss.item()
-
-            self.all_pred[self.iteration - 1, :outputs.shape[0]] = outputs
-            self.all_targets[self.iteration - 1, :outputs.shape[0]] = Y_batch
-            self.all_weights[self.iteration - 1, :outputs.shape[0]] = weights_batch
-
-        # Compute overall metrics
-        avg_epoch_r2 = r2_score(self.all_targets, self.all_pred, self.all_weights)
-
-        avg_epoch_loss = self.epoch_loss / self.total_iterations
-
-        self.all_pred = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((self.total_iterations, self.batch_size, 1), dtype=torch.float32)
-        self.iteration = 0
-        self.epoch_loss = 0
-
-        return avg_epoch_loss, avg_epoch_r2
-
-
-class MiniEvalClass:
-    def __init__(self, model, loader, optimizer, loss_function, device, mini_epoch_size, out_size, batch_size):
-        super().__init__()
-
-        self.model = model
+    def step_epoch(self):
         self.model.eval()
-
-        self.loader = loader
-        self.loss_function = loss_function
-        self.device = device
-
-        self.batch_size = batch_size
-        self.out_size = out_size
-
-        self.total_iterations = len(self.loader)
-
-        self.epoch_loss = 0
-
-        self.all_pred = torch.zeros((968, batch_size, out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((968, batch_size, out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((968, batch_size, 1), dtype=torch.float32)
-
-        self.iteration = 0
-
-        self.prev_pred = []
-
-    def step_eval(self):
-
-        self.all_pred = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_targets = torch.zeros((self.total_iterations, self.batch_size, self.out_size), dtype=torch.float32)
-        self.all_weights = torch.zeros((self.total_iterations, self.batch_size, 1), dtype=torch.float32)
-        self.iteration = 0
-        self.epoch_loss = 0
-
-        for X_batch, Y_batch, weights_batch, time in self.loader:
-            if time[:, 1] == 967 and self.iteration == 0:
-                self.prev_pred = Y_batch
-                continue
-            elif time[:, 1] != 0 and self.iteration == 0:
-                continue
-
+        self._reset_cache()
+        for X_batch, Y_batch, temporal_batch, weights_batch, symbol_batch in self.loader:
             self.iteration += 1
-
-            X_batch[:, -1, -9:] = self.prev_pred
 
             # Move data to specified device (CPU or GPU)
             X_batch, Y_batch = X_batch.to(self.device), Y_batch.to(self.device)
+            temporal_batch = temporal_batch.to(self.device)
             weights_batch = weights_batch.to(self.device)
+            symbol_batch = symbol_batch.to(self.device)
 
+            loss, outputs = self._run_model(X_batch, Y_batch, weights_batch)
+            self._update_cache(Y_batch, weights_batch, loss, outputs)
+
+        return self._calculate_statistics()
+
+    def _run_model(self, X_batch, Y_batch, weights_batch):
+        with no_grad():
             # Forward pass
             outputs = self.model(X_batch)
-
-            self.prev_pred = outputs
 
             if outputs.shape != Y_batch.shape:
                 raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, Y_batch.shape))
 
-            loss = r2_loss(y_true=Y_batch, y_pred=outputs, weights=weights_batch).mean()
+            loss = weighted_mse(y_true=Y_batch, y_pred=outputs, weights=weights_batch)
 
-            # Accumulate total loss
-            self.epoch_loss += loss.item()
-
-            self.all_pred[self.iteration - 1, :outputs.shape[0]] = outputs
-            self.all_targets[self.iteration - 1, :outputs.shape[0]] = Y_batch
-            self.all_weights[self.iteration - 1, :outputs.shape[0]] = weights_batch
-
-            if time[:, 1] == 967:
-                break
-
-        # Compute overall metrics
-        avg_epoch_r2 = r2_score(self.all_targets[:, :, 6:7], self.all_pred[:, :, 6:7], self.all_weights)
-
-        avg_epoch_loss = self.epoch_loss / 968
-
-        return avg_epoch_loss, avg_epoch_r2
+            return loss, outputs
 
 
