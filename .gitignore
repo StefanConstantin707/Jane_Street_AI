@@ -1,3 +1,4 @@
 .idea
-/jane-street-real-time-market-data-forecasting
+/JaneStreetRealTimeMarketDataForecasting
 __pycache__/
+.pt

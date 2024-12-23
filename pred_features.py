@@ -4,7 +4,6 @@ import torch
 from torch import optim, nn
 
 from Models.SimpleNN import SimpleNN
-from dataHandler import create_feature_dataloaders, load_data_xy_symbol, split_data_train_eval
 
 
 def train_model(model, loader, optimizer, loss_function, device):
