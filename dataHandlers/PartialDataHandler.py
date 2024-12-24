@@ -105,9 +105,14 @@ class RowSamplerSequence(PartialDataset):
         weights = self.get_weights(idx).unsqueeze(0)
         symbol = self.get_symbols(idx)
 
+        X[-1, 88] = symbol
+        X[-2, 88] = symbol
+
         c_time = self.get_times(idx)
         c_date = self.get_dates(idx)
         c_symbol = self.get_symbols(idx)
+
+        X[-1, 89] = c_time
 
         prev_day_end_idx = idx - c_time - 1
         if prev_day_end_idx < 0 or self.get_symbols(prev_day_end_idx) != c_symbol:
@@ -115,12 +120,14 @@ class RowSamplerSequence(PartialDataset):
 
         if self.data_type == "eval":
             X[0, :88] = self.get_features_and_responders(prev_day_end_idx)
+            X[-2, 89] = self.get_times(prev_day_end_idx)
         elif self.data_type == "train":
             max_time_id_last_day = self.get_times(prev_day_end_idx)
             rand_time_id = torch.randint(0, max_time_id_last_day + 1, (1,)).item()
 
             prev_idx = idx - rand_time_id
             X[0, :88] = self.get_features_and_responders(prev_idx)
+            X[-2, 89] = self.get_times(prev_idx)
         else:
             raise Error
 

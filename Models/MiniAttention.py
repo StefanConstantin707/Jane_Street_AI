@@ -3,7 +3,7 @@ from torch import nn
 from einops import repeat
 
 from Models.AttentionBlocks import SingleHeadSelfAttention, FeedForwardSingleLayer, SelfAttention, \
-    FeedForwardMultiLayerGelu, FeedForwardMultiLayer, FeedForwardGeneral
+    FeedForwardMultiLayerGelu, FeedForwardMultiLayer, FeedForwardGeneral, SymbolAndTimeEmbedding
 from Models.Noise import GaussianNoise
 
 
@@ -30,6 +30,8 @@ class TransformerGeneral(nn.Module):
     def __init__(self, *, dim_in, dim_attn, dim_qk, dim_v, attention_depth, dim_out, rotary_emb=True, mlp_layer_widths, activation_fct, dropout=0., noise=0.0):
         super().__init__()
 
+        self.embedding = SymbolAndTimeEmbedding(1, 1)
+
         self.batch_norm = nn.BatchNorm1d(dim_in)
 
         self.noise = GaussianNoise(std=noise)
@@ -44,6 +46,9 @@ class TransformerGeneral(nn.Module):
         self.to_responders = nn.Linear(dim_attn, dim_out)
 
     def forward(self, x):
+
+        x = self.embedding(x)
+
         x = self.batch_norm(x.transpose(-1, -2)).transpose(-1, -2)
         x = self.noise(x)
 

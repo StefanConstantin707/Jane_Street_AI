@@ -13,6 +13,31 @@ class RotationalPositionalEncoding1D(nn.Module):
         return self.rotary_emb.rotate_queries_or_keys(q), self.rotary_emb.rotate_queries_or_keys(k)
 
 
+class SymbolAndTimeEmbedding(nn.Module):
+    def __init__(self, embedding_dim_symbol, embedding_dim_time):
+        super(SymbolAndTimeEmbedding, self).__init__()
+
+        self.embedding_dim_symbol = embedding_dim_symbol
+        self.embedding_dim_time = embedding_dim_time
+
+        self.embedding_s = nn.Embedding(100, embedding_dim_symbol)
+        self.embedding_t = nn.Embedding(1000, embedding_dim_time)
+    def forward(self, x):
+        # x: N, in_dim
+        # symbol_id: N, 1
+        # time_id: N, 1
+        symbol_id = x[:, :, -2].to(torch.int32)
+        time_id = x[:, :, -1].to(torch.int32)
+
+        # N -> N, embedding_dim
+        emb_symbol = self.embedding_s(symbol_id)
+        emb_time = self.embedding_t(time_id)
+
+        x = torch.cat((x[:, :, :-2], emb_symbol, emb_time), dim=2)
+
+        return x
+
+
 class FeedForwardSingleLayer(nn.Module):
     def __init__(self, dim_in, dim_out, dropout=0.):
         super().__init__()
