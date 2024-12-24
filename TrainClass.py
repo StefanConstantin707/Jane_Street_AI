@@ -1,6 +1,7 @@
 import torch
+import matplotlib
 from matplotlib import pyplot as plt
-
+matplotlib.use('TkAgg')
 from Utillity.LossFunctions import r2_loss, r2_score, weighted_mse, weighted_mse_r6, weighted_mse_r6_weighted
 
 
@@ -121,6 +122,7 @@ class GeneralTrain(GeneralTrainEvalClass):
         self.optimizer.zero_grad()
 
         return loss, outputs
+
 
 class GeneralEval(GeneralTrainEvalClass):
     def __init__(self, model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size):

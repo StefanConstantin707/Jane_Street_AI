@@ -3,10 +3,10 @@ from torch import nn
 from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding
 
+
 class RotationalPositionalEncoding1D(nn.Module):
     def __init__(self, channels):
         super().__init__()
-
         self.rotary_emb = RotaryEmbedding(dim=channels//2)
 
     def forward(self, q, k):
@@ -85,6 +85,32 @@ class FeedForwardMultiLayer(nn.Module):
         # Create the network
         self.net = nn.Sequential(*layers)
 
+    def forward(self, x):
+        return self.net(x)
+
+
+class FeedForwardGeneral(nn.Module):
+    def __init__(self, layer_widths: list, activation_fct, dropout=0.):
+        super().__init__()
+        layers = []
+        depth = len(layer_widths) - 1
+
+        for i in range(depth - 1):
+            layers.append(nn.Linear(layer_widths[i], layer_widths[i + 1]))
+            if i < depth - 2:
+                if activation_fct == 'relu':
+                    layers.append(nn.ReLU())
+                elif activation_fct == 'gelu':
+                    layers.append(nn.GELU())
+                elif activation_fct == 'tanh':
+                    layers.append(nn.Tanh())
+                elif activation_fct == 'silu':
+                    layers.append(nn.SiLU())
+                else:
+                    raise NotImplementedError(activation_fct)
+            layers.append(nn.Dropout(dropout))
+
+        self.net = nn.Sequential(*layers)
     def forward(self, x):
         return self.net(x)
 

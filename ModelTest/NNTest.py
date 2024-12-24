@@ -12,6 +12,7 @@ from dataHandlers.SingleSymbolHandler import SingleRowSamplingDatasetSS
 
 def nn_test():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(device)
     in_size = 79
     out_size = 9
     epochs = 20
@@ -20,7 +21,7 @@ def nn_test():
     lr = 3e-4
     noise = 0.5
 
-    model = SimpleNN(input_size=in_size, hidden_dim=64, output_size=out_size, num_layers=2, dropout_prob=0.3, noise=noise).to(device)
+    model = SimpleNN(input_size=in_size, hidden_dim=256, output_size=out_size, num_layers=2, dropout_prob=0.3, noise=noise).to(device)
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Total number of parameters: {total_params}")
 
@@ -28,10 +29,10 @@ def nn_test():
     loss_function = nn.MSELoss(reduction='none')
 
     trainDataset = SingleRowPD(data_type='train', path="./", start_date=1400, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
-    evalDataset = SingleRowPD(data_type='eval', path="./", start_date=1580, end_date=1581, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
+    evalDataset = SingleRowPD(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
 
-    train_loader = torch.utils.data.DataLoader(trainDataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
-    eval_loader = torch.utils.data.DataLoader(evalDataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    train_loader = torch.utils.data.DataLoader(trainDataset, batch_size=batch_size, shuffle=True, num_workers=5, pin_memory=True)
+    eval_loader = torch.utils.data.DataLoader(evalDataset, batch_size=batch_size, shuffle=False, num_workers=5, pin_memory=True)
 
     trainClass = GeneralTrain(model, train_loader, optimizer, r2_loss, device, out_size, batch_size, mini_epoch_size)
     evalClass = GeneralEval(model, eval_loader, optimizer, r2_loss, device, out_size, batch_size, mini_epoch_size)
