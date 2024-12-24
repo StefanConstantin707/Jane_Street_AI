@@ -67,16 +67,16 @@ class GeneralTrainEvalClass:
             for i in range(9)
         ]
 
-        r2_score_per_day = []
-        for i in range(978):
-            mask = self.all_temporal[:, :, 1].view(-1) == i
-            pred = self.all_pred[:, :, 6].view(-1)[mask]
-            target = self.all_targets[:, :, 6].view(-1)[mask]
-            weights = self.all_weights.view(-1)[mask]
-
-            r2_score_per_day.append(r2_score(pred, target, weights=weights).item())
-        plt.plot(r2_score_per_day)
-        plt.show()
+        # r2_score_per_day = []
+        # for i in range(978):
+        #     mask = self.all_temporal[:, :, 1].view(-1) == i
+        #     pred = self.all_pred[:, :, 6].view(-1)[mask]
+        #     target = self.all_targets[:, :, 6].view(-1)[mask]
+        #     weights = self.all_weights.view(-1)[mask]
+        #
+        #     r2_score_per_day.append(r2_score(pred, target, weights=weights).item())
+        # plt.plot(r2_score_per_day)
+        # plt.show()
 
         return avg_epoch_loss, avg_epoch_r2, avg_epoch_mse, avg_epoch_r2_responders
 
