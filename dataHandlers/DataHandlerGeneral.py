@@ -76,7 +76,7 @@ class GeneralDataset(Dataset):
         data = self.get_features()
         means = torch.mean(data, dim=0, keepdim=True)
         std = torch.std(data, dim=0, keepdim=True)
-        std = torch.where(std == 0, 1, 0)
+        std = torch.where(std == 0, 0, std)
 
         self.data[:, :79] = (self.data[:, :79] - means) / std
 

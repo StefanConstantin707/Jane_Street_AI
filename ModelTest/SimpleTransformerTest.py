@@ -25,8 +25,8 @@ def attention_test():
 
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
-    trainDataset = RowSamplerSequence(data_type='train', path="./", start_date=1400, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False, rows_to_sample=1)
-    evalDataset = RowSamplerSequence(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False, rows_to_sample=1)
+    trainDataset = RowSamplerSequence(data_type='train', path="./", start_date=1400, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False, rows_to_sample=17)
+    evalDataset = RowSamplerSequence(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False, rows_to_sample=17)
 
     train_loader = torch.utils.data.DataLoader(trainDataset, batch_size=batch_size, shuffle=True, num_workers=5, pin_memory=True)
     eval_loader = torch.utils.data.DataLoader(evalDataset, batch_size=batch_size, shuffle=False, num_workers=5, pin_memory=True)
