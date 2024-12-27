@@ -24,9 +24,10 @@ class GeneralDataset(Dataset):
         self.nu_rows = self.data.shape[0]
         self.nu_cols = self.data.shape[1]
 
-
-
         self.nu_days = end_date - start_date
+
+        # if self.data_type == 'train':
+        #     self._skew_weights()
 
     def _load_partial_data(self, jane_street_real_time_market_data_forecasting_path, start_date=1400, end_date=1699) -> pl.LazyFrame | pl.DataFrame:
 
@@ -79,6 +80,17 @@ class GeneralDataset(Dataset):
         std = torch.where(std == 0, 0, std)
 
         self.data[:, :79] = (self.data[:, :79] - means) / std
+
+    def _skew_weights(self):
+        adjust_tensor = torch.arange(self.nu_rows, dtype=torch.float32, device=self.data.device)
+        adjust_tensor = adjust_tensor / torch.max(adjust_tensor) + 0.5
+
+        self.data[:, 91] = self.data[:, 91] * adjust_tensor
+
+    def get_all(self, idx=None):
+        if idx is None:
+            return self.data[:, :]
+        return self.data[idx, :]
 
     def get_features(self, idx=None):
         if idx is None:

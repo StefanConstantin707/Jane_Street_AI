@@ -39,6 +39,7 @@ def weighted_mse(y_pred, y_true, weights):
     loss_fct = nn.MSELoss(reduction='none')
 
     unweighted_loss = loss_fct(y_pred, y_true)
+
     weighted_loss = weights * unweighted_loss
 
     return weighted_loss.mean()
