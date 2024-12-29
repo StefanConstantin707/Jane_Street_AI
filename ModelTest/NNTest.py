@@ -74,8 +74,8 @@ def nn_test_gpu():
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     loss_function = nn.MSELoss(reduction='none')
 
-    trainDataset = SingleRowPD(data_type='train', path="./", start_date=1570, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
-    evalDataset = SingleRowPD(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
+    trainDataset = SingleRowPD(data_type='train', path="./JaneStreetRealTimeMarketDataForecasting", start_date=1570, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
+    evalDataset = SingleRowPD(data_type='eval', path="./JaneStreetRealTimeMarketDataForecasting", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
 
     train_loader = GPULoader(trainDataset, True, batch_size, device)
     eval_loader = GPULoader(evalDataset, False, batch_size, device)
@@ -122,8 +122,10 @@ def nn_test_online():
 
     online_optimizer = optim.Adam(model.parameters(), lr=lr*0.1, weight_decay=1e-4)
 
-    cacheDataset = SingleRowPD(data_type='train', path="./", start_date=1400, end_date=1580, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
-    evalDataset = SingleRowPD(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device, collect_data_at_loading=False, normalize_features=False)
+    cacheDataset = SingleRowPD(data_type='train', path="./", start_date=1400, end_date=1580, out_size=out_size, in_size=in_size,
+                               device=device, collect_data_at_loading=False, normalize_features=False, dual_loading=False)
+    evalDataset = SingleRowPD(data_type='eval', path="./", start_date=1580, end_date=1699, out_size=out_size, in_size=in_size,
+                              device=device, collect_data_at_loading=False, normalize_features=False, dual_loading=False)
 
     cache_loader = GPUOnlineCacheLoader(cacheDataset, True, batch_size, device)
     eval_loader = GPUOnlineLoader(evalDataset, device)

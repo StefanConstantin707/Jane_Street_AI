@@ -10,16 +10,16 @@ from dataHandlers.DataHandlerGeneral import GeneralDataset
 
 class PartialDataset(GeneralDataset):
     def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int,
-                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device):
+                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device, dual_loading):
         super().__init__(data_type, path, start_date, end_date, in_size, out_size, sort_symbols,
-                         collect_data_at_loading, normalize_features, device, None)
+                         collect_data_at_loading, normalize_features, device, None, dual_loading)
 
 
 class SingleRowPD(PartialDataset):
     def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int,
-                 collect_data_at_loading: bool, normalize_features: bool, device: torch.device):
+                 collect_data_at_loading: bool, normalize_features: bool, device: torch.device, dual_loading):
         super().__init__(data_type, path, start_date, end_date, in_size, out_size, False, collect_data_at_loading,
-                         normalize_features, device)
+                         normalize_features, device, dual_loading)
 
     def __len__(self):
         return self.nu_rows

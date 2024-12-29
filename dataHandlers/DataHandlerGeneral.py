@@ -4,7 +4,8 @@ import torch
 
 
 class GeneralDataset(Dataset):
-    def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int, sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device, single_symbol: int = None):
+    def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int,
+                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device, single_symbol: int = None, dual_loading: bool = False):
         self.data_type = data_type
         if self.data_type != 'train' and self.data_type != 'eval':
             raise ValueError('Type must be either train or eval')
@@ -16,8 +17,21 @@ class GeneralDataset(Dataset):
         self.collect_data_at_loading = collect_data_at_loading
         self.device = device
 
-        train_data = self._load_partial_data(path, start_date, end_date)
-        self.data = self._extract_train_data(train_data)
+        if dual_loading:
+            start_date_1 = start_date
+            end_date_1 = (end_date - start_date) // 2
+            start_date_2 = end_date_1
+            end_date_2 = end_date
+            train_data_1 = self._load_partial_data(path, start_date_1, end_date_1)
+            train_data_1 = self._extract_train_data(train_data_1).to(device)
+
+            train_data_2 = self._load_partial_data(path, start_date_2, end_date_2)
+            train_data_2 = self._extract_train_data(train_data_2).to(device)
+            self.data = torch.cat((train_data_1, train_data_2), dim=0)
+        else:
+            train_data = self._load_partial_data(path, start_date, end_date)
+            self.data = self._extract_train_data(train_data)
+
         if normalize_features:
             self._normalize_features()
 
@@ -31,7 +45,7 @@ class GeneralDataset(Dataset):
 
     def _load_partial_data(self, jane_street_real_time_market_data_forecasting_path, start_date=1400, end_date=1699) -> pl.LazyFrame | pl.DataFrame:
 
-        all_train_data = pl.scan_parquet(f"{jane_street_real_time_market_data_forecasting_path}JaneStreetRealTimeMarketDataForecasting/train.parquet")
+        all_train_data = pl.scan_parquet(f"{jane_street_real_time_market_data_forecasting_path}/train.parquet")
 
         train_data = all_train_data.filter((pl.col("date_id") >= start_date) & (pl.col("date_id") < end_date))
         if self.single_symbol is not None:
