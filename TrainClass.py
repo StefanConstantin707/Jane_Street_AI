@@ -38,8 +38,8 @@ class GeneralTrainEvalClass:
         self.len_eval = self.loader.dataset.nu_rows
 
         self.stats_day_mapping = np.empty((0,))
-        if train_eval_type == 'eval':
-            self._create_day_mapping()
+        # if train_eval_type == 'eval':
+        #     self._create_day_mapping()
 
     def _reset_cache(self):
         self.all_pred = torch.zeros((self.len_eval, self.out_size), dtype=torch.float32)
@@ -83,8 +83,8 @@ class GeneralTrainEvalClass:
             for i in range(9)
         ]
 
-        if self.train_eval_type == "eval":
-            self._calculate_day_statistics()
+        # if self.train_eval_type == "eval":
+        #     self._calculate_day_statistics()
 
         return avg_epoch_loss, avg_epoch_r2, avg_epoch_mse, avg_epoch_r2_responders
 
@@ -182,7 +182,7 @@ class GeneralTrainEvalClass:
 
         return self._calculate_statistics()
 
-    def _run_model(self, x_batch, y_batch, weights_batch):
+    def _run_model(self, x_batch, y_batch, weights_batch, symbol_batch=None):
         if self.train_eval_type == "eval":
             with torch.no_grad():
                 # Forward pass
@@ -234,7 +234,61 @@ class GPUTrainEvalClass(GeneralTrainEvalClass):
             self._update_cache(y_batch, weights_batch, loss, outputs, temporal_batch)
             self._log()
 
+        return self._calculate_statistics()\
+
+
+class GPUTrainEvalSymbolsClass(GeneralTrainEvalClass):
+    def __init__(self, model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size, train_eval_type):
+        super().__init__(model, loader, optimizer, loss_function, device, out_size, batch_size, mini_epoch_size, train_eval_type)
+
+    def step_epoch(self):
+        if self.train_eval_type == "eval":
+            self.model.eval()
+        elif self.train_eval_type == "train":
+            self.model.train()
+
+        self._reset_cache()
+
+        for i in range(self.loader.nu_batches):
+            self.iteration += 1
+            x_batch, y_batch, temporal_batch, weights_batch, symbol_batch = self.loader.get_batch()
+
+            loss, outputs = self._run_model(x_batch, y_batch, weights_batch, symbol_batch)
+            self._update_cache(y_batch, weights_batch, loss, outputs, temporal_batch)
+            self._log()
+
         return self._calculate_statistics()
+
+    def _run_model(self, x_batch, y_batch, weights_batch, symbol_batch=None):
+        if self.train_eval_type == "eval":
+            with torch.no_grad():
+                # Forward pass
+                outputs = self.model(x_batch, symbol_batch)
+
+                if outputs.shape != y_batch.shape:
+                    raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, y_batch.shape))
+
+                loss = weighted_mse(y_true=y_batch, y_pred=outputs, weights=weights_batch)
+
+                return loss, outputs
+        elif self.train_eval_type == "train":
+            outputs = self.model(x_batch, symbol_batch)
+
+            if outputs.shape != y_batch.shape:
+                raise ValueError("Output shape mismatch, with shapes {} vs {} ".format(outputs.shape, y_batch.shape))
+
+            loss = weighted_mse(y_true=y_batch, y_pred=outputs, weights=weights_batch)
+
+            # Backpropagation
+            loss.backward()
+
+            # Update model parameters
+            self.optimizer.step()
+
+            # Reset gradient to 0
+            self.optimizer.zero_grad()
+
+            return loss, outputs
 
 
 class GPUEvalOnlineClass(GeneralTrainEvalClass):

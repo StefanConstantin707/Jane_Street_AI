@@ -16,6 +16,7 @@ class GeneralDataset(Dataset):
         self.sort_symbols = sort_symbols
         self.collect_data_at_loading = collect_data_at_loading
         self.device = device
+        self.nu_days = end_date - start_date
 
         if dual_loading:
             start_date_1 = start_date
@@ -38,7 +39,7 @@ class GeneralDataset(Dataset):
         self.nu_rows = self.data.shape[0]
         self.nu_cols = self.data.shape[1]
 
-        self.nu_days = end_date - start_date
+
 
         # if self.data_type == 'train':
         #     self._skew_weights()
@@ -77,9 +78,9 @@ class GeneralDataset(Dataset):
         required_data = required_data.fill_null(0)
 
         if self.collect_data_at_loading:
-            data = torch.tensor(required_data.to_numpy())
+            data = torch.tensor(required_data.to_numpy(), dtype=torch.float32)
         else:
-            data = torch.tensor(required_data.collect().to_numpy())
+            data = torch.tensor(required_data.collect().to_numpy(), dtype=torch.float32)
 
         print(f'Numpy {self.data_type} data created with shape: {data.shape}')
         if self.data_type == 'train':

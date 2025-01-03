@@ -10,9 +10,49 @@ from dataHandlers.DataHandlerGeneral import GeneralDataset
 
 class PartialDataset(GeneralDataset):
     def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int,
-                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device, dual_loading):
+                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device,
+                 dual_loading):
         super().__init__(data_type, path, start_date, end_date, in_size, out_size, sort_symbols,
                          collect_data_at_loading, normalize_features, device, None, dual_loading)
+
+
+class ConstantNumberOFSymbols(GeneralDataset):
+    def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int,
+                 sort_symbols: bool, collect_data_at_loading: bool, normalize_features: bool, device: torch.device,
+                 dual_loading):
+        super().__init__(data_type, path, start_date, end_date, in_size, out_size, sort_symbols,
+                         collect_data_at_loading, normalize_features, device, None, dual_loading)
+
+    def _load_partial_data(self, jane_street_real_time_market_data_forecasting_path, start_date=1400,
+                           end_date=1699) -> pl.LazyFrame | pl.DataFrame:
+        all_train_data = pl.scan_parquet(f"{jane_street_real_time_market_data_forecasting_path}/train.parquet")
+
+        train_data = all_train_data.filter((pl.col("date_id") >= start_date) & (pl.col("date_id") < end_date))
+        if self.single_symbol is not None:
+            train_data = train_data.filter(pl.col("symbol_id") == self.single_symbol)
+
+        if self.collect_data_at_loading:
+            train_data = train_data.collect()
+
+        if self.sort_symbols:
+            train_data = train_data.sort("symbol_id", maintain_order=True)
+
+        symbols = np.tile(np.arange(39), reps=968 * self.nu_days)
+        time_ids = np.tile(np.repeat(np.arange(968), repeats=39), reps=self.nu_days)
+        date_ids = np.repeat(np.arange(start_date, end_date), repeats=39 * 968)
+
+        data = {
+            'date_id': date_ids,
+            'time_id': time_ids,
+            'symbol_id': symbols
+        }
+
+        # Creating the DataFrame
+        identifier_df = pl.LazyFrame(data)
+
+        train_data = train_data.join(identifier_df, on=["date_id", "time_id", "symbol_id"], how="right").fill_null(0)
+
+        return train_data
 
 
 class SingleRowPD(PartialDataset):
@@ -124,7 +164,7 @@ class RowSamplerDatasetPD(PartialDataset):
             if prev_date < c_date:
                 X[79:88] = self.data[prev_idx, 79:88]
         else:
-            raise Error
+            raise Exception
 
         return X, Y, temporal, weights, symbol
 
@@ -134,7 +174,7 @@ class RowSamplerSequence(PartialDataset):
                  collect_data_at_loading: bool, normalize_features: bool, device: torch.device,
                  rows_to_sample: int = 1):
         super().__init__(data_type, path, start_date, end_date, in_size, out_size, True, collect_data_at_loading,
-                         normalize_features, device)
+                         normalize_features, device, False)
         self.rows_to_sample = rows_to_sample
 
     def __len__(self):
@@ -175,7 +215,7 @@ class RowSamplerSequence(PartialDataset):
             X[:-1, :88] = self.get_features_and_responders(prev_idx)
             X[:-1, 89] = self.get_times(prev_idx)
         else:
-            raise Error
+            raise Exception
 
         return X, Y, temporal, weights, symbol
 
@@ -224,6 +264,7 @@ class GPULoader:
             self.batch_number = 0
 
         return X, Y, temporal, weights, symbol
+
 
 class GPUOnlineLoader:
     def __init__(self, dataset, device):
@@ -285,11 +326,12 @@ class GPUOnlineLoader:
 
         return data, X, Y, temporal, weights, symbol
 
+
 class GPUOnlineCacheLoader:
     def __init__(self, dataset, shuffle, batch_size, device):
         super().__init__()
         self.dataset = dataset
-        self.dataset.data = self.dataset.data[-batch_size*968:].to(device)
+        self.dataset.data = self.dataset.data[-batch_size * 968:].to(device)
         self.nu_rows = batch_size * 968
 
         self.batch_size = batch_size
@@ -317,8 +359,8 @@ class GPUOnlineCacheLoader:
 
     def add_data(self, data):
         if self.added_indices == 0:
-            self.day_cache = torch.zeros((968*data.shape[0], data.shape[1]))
-        self.day_cache[self.added_indices:self.added_indices+data.shape[0]] = data
+            self.day_cache = torch.zeros((968 * data.shape[0], data.shape[1]))
+        self.day_cache[self.added_indices:self.added_indices + data.shape[0]] = data
         self.added_indices += data.shape[0]
 
     def _update_data(self):
@@ -348,3 +390,114 @@ class GPUOnlineCacheLoader:
 
         return data, X, Y, temporal, weights, symbol
 
+
+class GPULoaderCstSymbol:
+    def __init__(self, dataset, shuffle, batch_size, device):
+        super().__init__()
+        self.dataset = dataset
+        self.dataset.data = self.dataset.data.to(device).view(self.dataset.nu_days * 968, 39, -1)
+
+        self.batch_size = batch_size
+
+        self.batch_number = 0
+        self.shuffle = shuffle
+        self.nu_batches = self._len()
+
+        self.shuffled_indices = torch.arange(self.dataset.nu_days * 968 * 39)
+        if self.shuffle:
+            self._shuffle_data()
+
+    def __len__(self):
+        return self.nu_batches
+
+    def _len(self):
+        return math.ceil(self.dataset.nu_rows / self.batch_size)
+
+    def _shuffle_data(self):
+        self.shuffled_indices = torch.randperm(self.dataset.nu_rows)
+
+    def get_batch(self):
+        start_idx = self.batch_number * self.batch_size
+        self.batch_number += 1
+        end_idx = min(self.batch_number * self.batch_size, self.dataset.nu_rows)
+
+        batch_indexes = self.shuffled_indices[start_idx:end_idx]
+
+        data_batches = batch_indexes // 39
+        symbol_batch = batch_indexes % 39
+
+        X = self.dataset.data[data_batches, :, :79]
+        Y = self.dataset.data[data_batches, symbol_batch, 79:88]
+        temporal = self.dataset.data[data_batches, symbol_batch, 89:91].to(torch.int32)
+        weights = self.dataset.data[data_batches, symbol_batch, 91].unsqueeze(-1)
+        symbol = self.dataset.data[data_batches, symbol_batch, 88].to(torch.int32)
+
+        if self.batch_number == self.nu_batches:
+            if self.shuffle:
+                self._shuffle_data()
+            self.batch_number = 0
+
+        return X, Y, temporal, weights, symbol
+
+
+class GPURowSampler:
+    def __init__(self, dataset, shuffle, batch_size, device):
+        super().__init__()
+        self.device = device
+        self.dataset = dataset
+        self.dataset.data = self.dataset.data.to(device)
+
+        self.batch_size = batch_size
+
+        self.batch_number = 0
+        self.shuffle = shuffle
+        self.nu_batches = self._len()
+
+        self.shuffled_indices = torch.arange(self.dataset.nu_days * 968 * 39)
+        if self.shuffle:
+            self._shuffle_data()
+
+    def __len__(self):
+        return self.nu_batches
+
+    def _len(self):
+        return math.ceil(self.dataset.nu_rows / self.batch_size)
+
+    def _shuffle_data(self):
+        self.shuffled_indices = torch.randperm(self.dataset.nu_rows)
+
+    def get_batch(self):
+        start_idx = self.batch_number * self.batch_size
+        self.batch_number += 1
+        end_idx = min(self.batch_number * self.batch_size, self.dataset.nu_rows)
+
+        batch_indexes = self.shuffled_indices[start_idx:end_idx]
+
+        X = torch.zeros((self.batch_size, 2, 90), dtype=torch.float32, device=self.device)
+
+        X[:, 1, :79] = self.dataset.data[batch_indexes, :79]
+
+        rand_int_last_day = torch.randint(0, 968, (self.batch_size,), dtype=torch.int32)
+
+        times = self.dataset.data[batch_indexes, 90].to(torch.int32)
+
+        rand_times_indexes = batch_indexes - times - 968 + rand_int_last_day
+        rand_times_indexes = torch.where(rand_times_indexes < 0, 0, rand_times_indexes)
+
+        X[:, 0, :88] = self.dataset.data[rand_times_indexes, :88]
+        X[:, 0, 89] = times + 968 - rand_int_last_day
+
+
+        Y = self.dataset.data[batch_indexes, 79:88]
+        temporal = self.dataset.data[batch_indexes, 89:91].to(torch.int32)
+        weights = self.dataset.data[batch_indexes, 91].unsqueeze(-1)
+        symbol = self.dataset.data[batch_indexes, 88].to(torch.int32)
+
+        X[:, :, 88] = torch.ones_like(X[:, :, 88], dtype=torch.float32, device=self.device) * symbol.unsqueeze(-1)
+
+        if self.batch_number == self.nu_batches:
+            if self.shuffle:
+                self._shuffle_data()
+            self.batch_number = 0
+
+        return X, Y, temporal, weights, symbol

@@ -51,6 +51,7 @@ class TransformerGeneral(nn.Module):
 
         x = self.batch_norm(x.transpose(-1, -2)).transpose(-1, -2)
         x = self.noise(x)
+        x = self.batch_norm(x.transpose(-1, -2)).transpose(-1, -2)
 
         # N, Seq_L, dim_in -> N, Seq_L, dim_attn
         x = self.to_input(x)

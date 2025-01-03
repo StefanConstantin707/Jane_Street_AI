@@ -21,7 +21,7 @@ class SymbolAndTimeEmbedding(nn.Module):
         self.embedding_dim_time = embedding_dim_time
 
         self.embedding_s = nn.Embedding(100, embedding_dim_symbol)
-        self.embedding_t = nn.Embedding(1000, embedding_dim_time)
+        self.embedding_t = nn.Embedding(2000, embedding_dim_time)
     def forward(self, x):
         # x: N, in_dim
         # symbol_id: N, 1
