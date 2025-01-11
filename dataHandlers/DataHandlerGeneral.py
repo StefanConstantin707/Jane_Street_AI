@@ -1,3 +1,5 @@
+import math
+
 from torch.utils.data import Dataset
 import polars as pl
 import torch
@@ -39,10 +41,6 @@ class GeneralDataset(Dataset):
         self.nu_rows = self.data.shape[0]
         self.nu_cols = self.data.shape[1]
 
-
-
-        # if self.data_type == 'train':
-        #     self._skew_weights()
 
     def _load_partial_data(self, jane_street_real_time_market_data_forecasting_path, start_date=1400, end_date=1699) -> pl.LazyFrame | pl.DataFrame:
 
@@ -146,3 +144,125 @@ class GeneralDataset(Dataset):
         if idx is None:
             return self.data[:, 89:91]
         return self.data[idx, 89:91]
+
+
+class GeneralDatasetResponder(GeneralDataset):
+    def __init__(self, data_type: str, path: str, start_date: int, end_date: int, in_size: int, out_size: int, sort_symbols: bool, device: torch.device):
+        super().__init__(data_type, path, start_date, end_date, in_size, out_size, sort_symbols, False, False, device, None, False)
+
+    def _extract_train_data(self, train_data: pl.LazyFrame | pl.DataFrame) -> torch.Tensor:
+        # Generate features
+        responders_features = [f"responder_{i}" for i in range(9)]
+        symbol_feature = ['symbol_id']
+        temporal_features = ['date_id', 'time_id']
+        weight_feature = ['weight']
+
+        # Combine features
+        required_features = responders_features + symbol_feature + temporal_features + weight_feature
+
+        # Create a dictionary mapping features to their indices
+        feature_index_mapping = {feature: index for index, feature in enumerate(required_features)}
+
+        required_data = train_data.select(required_features)
+        required_data = required_data.fill_null(0)
+
+        if self.collect_data_at_loading:
+            data = torch.tensor(required_data.to_numpy(), dtype=torch.float32)
+        else:
+            data = torch.tensor(required_data.collect().to_numpy(), dtype=torch.float32)
+
+        print(f'Numpy {self.data_type} data created with shape: {data.shape}')
+        if self.data_type == 'train':
+            print(f'Numpy dataframe columns and indexes:{feature_index_mapping}')
+
+        return data
+
+    def get_all(self, idx=None):
+        if idx is None:
+            return self.data[:, :]
+        return self.data[idx, :]
+
+    def get_responders(self, idx=None):
+        if idx is None:
+            return self.data[:, :9]
+        return self.data[idx, :9]
+
+    def get_symbols(self, idx=None):
+        if idx is None:
+            return self.data[:, 9].to(torch.int32)
+        return self.data[idx, 9].to(torch.int32)
+
+    def get_dates(self, idx=None):
+        if idx is None:
+            return self.data[:, 10].to(torch.int32)
+        return self.data[idx, 10].to(torch.int32)
+
+    def get_times(self, idx=None):
+        if idx is None:
+            return self.data[:, 11].to(torch.int32)
+        return self.data[idx, 11].to(torch.int32)
+
+    def get_weights(self, idx=None):
+        if idx is None:
+            return self.data[:, 12]
+        return self.data[idx, 12]
+
+    def get_temporal(self, idx=None):
+        if idx is None:
+            return self.data[:, 10:12]
+        return self.data[idx, 10:12]
+
+
+class GPULoaderGeneral:
+    def __init__(self, dataset, shuffle, batch_size, device, min_row_offset=0, max_row_offset=0):
+        super().__init__()
+        self.dataset = dataset
+        self.shuffle = shuffle
+        self.batch_size = batch_size
+        self.device = device
+        self.min_row_offset = min_row_offset
+        self.max_row_offset = max_row_offset
+
+        self.dataset.data = self.dataset.data.to(device)
+        self.nu_rows = self.dataset.data.shape[0]
+
+        self.batch_number = 0
+        self.nu_batches = self._len()
+
+        self.shuffled_indices = torch.arange(min_row_offset, self.dataset.nu_rows - max_row_offset)
+        if self.shuffle:
+            self._shuffle_data()
+
+    def __len__(self):
+        return self.nu_batches
+
+    def _len(self):
+        return math.ceil((self.dataset.nu_rows - self.min_row_offset - self.max_row_offset) / self.batch_size)
+
+    def _shuffle_data(self):
+        self.shuffled_indices = torch.randperm(self.dataset.nu_rows - self.min_row_offset - self.max_row_offset) + self.min_row_offset - self.max_row_offset
+
+    def _get_batch_indexes(self):
+        start_idx = self.batch_number * self.batch_size
+        self.batch_number += 1
+        end_idx = min(self.batch_number * self.batch_size, self.dataset.nu_rows)
+
+        return self.shuffled_indices[start_idx:end_idx]
+
+    def get_batch(self):
+        batch_indexes = self._get_batch_indexes()
+
+        X = self.dataset.get_features(batch_indexes)
+        Y = self.dataset.get_responders(batch_indexes)
+        temporal = self.dataset.get_temporal(batch_indexes)
+        weights = self.dataset.get_weights(batch_indexes).unsqueeze(-1)
+        symbol = self.dataset.get_symbols(batch_indexes)
+
+        if self.batch_number == self.nu_batches:
+            if self.shuffle:
+                self._shuffle_data()
+            self.batch_number = 0
+
+        return X, Y, temporal, weights, symbol
+
+

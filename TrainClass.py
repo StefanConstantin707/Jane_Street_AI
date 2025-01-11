@@ -4,7 +4,7 @@ import torch
 import matplotlib
 from matplotlib import pyplot as plt
 matplotlib.use('TkAgg')
-from Utillity.LossFunctions import r2_loss, r2_score, weighted_mse, weighted_mse_r6, weighted_mse_r6_weighted
+from Utillity.LossFunctions import r2_score, weighted_mse
 from scipy.stats import linregress
 
 
@@ -234,7 +234,7 @@ class GPUTrainEvalClass(GeneralTrainEvalClass):
             self._update_cache(y_batch, weights_batch, loss, outputs, temporal_batch)
             self._log()
 
-        return self._calculate_statistics()\
+        return self._calculate_statistics()
 
 
 class GPUTrainEvalSymbolsClass(GeneralTrainEvalClass):
@@ -336,3 +336,49 @@ class GPUEvalOnlineClass(GeneralTrainEvalClass):
 
         # Reset gradient to 0
         self.optimizer.zero_grad()
+
+
+class GPUReplaceTrainData:
+    def __init__(self, model, loader, batch_size, mini_epoch_size):
+        super().__init__()
+
+        self.model = model
+        self.loader = loader
+
+        self.total_iterations = len(self.loader)
+
+        self.batch_size = batch_size
+        self.mini_epoch_size = mini_epoch_size
+
+        self.iteration = 0
+
+    def _log(self):
+        if self.iteration % self.mini_epoch_size == 0 or self.iteration == self.total_iterations:
+            print(f"Iteration {self.iteration}/{self.total_iterations}")
+
+    def step_epoch(self):
+        self.model.eval()
+
+        print("Modifying Data")
+
+        for i in range(self.loader.nu_batches):
+            self.iteration += 1
+            x_batch, y_batch, temporal_batch, weights_batch, symbol_batch = self.loader.get_batch()
+
+            outputs = self._run_model(x_batch)
+
+            start_index = (self.iteration - 1) * self.batch_size
+            end_index = min(start_index + self.batch_size, self.loader.dataset.data.shape[0])
+
+            self.loader.dataset.data[start_index:end_index, 79:88] = outputs.clone()
+
+            self._log()
+
+        print("Finished Modifying Data")
+
+    def _run_model(self, x_batch):
+        with torch.no_grad():
+            # Forward pass
+            outputs = self.model(x_batch)
+
+            return outputs

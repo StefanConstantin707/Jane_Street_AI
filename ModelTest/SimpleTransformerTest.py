@@ -4,8 +4,7 @@ from torch import optim
 from Models.MiniAttention import TransformerGeneral
 from TrainClass import GPUTrainEvalSymbolsClass, GeneralTrainEvalClass, GPUTrainEvalClass
 from Utillity.LossFunctions import r2_loss
-from dataHandlers.PartialDataHandler import RowSamplerSequence, GPULoaderCstSymbol, ConstantNumberOFSymbols, \
-    GPURowSampler, PartialDataset
+from dataHandlers.PartialDataHandler import RowSamplerSequence, ConstantNumberOFSymbols, PartialDataset
 
 
 def attention_test():

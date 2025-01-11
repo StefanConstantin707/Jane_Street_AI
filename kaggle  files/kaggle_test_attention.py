@@ -772,10 +772,10 @@ print(f"Total number of parameters: {total_params}")
 
 optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
-trainDataset = RowSamplerSequence(data_type='train', path="./JaneStreetRealTimeMarketDataForecasting",
+trainDataset = RowSamplerSequence(data_type='train', path="../JaneStreetRealTimeMarketDataForecasting",
                                   start_date=1400, end_date=1580, out_size=out_size, in_size=in_size, device=device,
                                   collect_data_at_loading=False, normalize_features=False, rows_to_sample=17)
-evalDataset = RowSamplerSequence(data_type='eval', path="./JaneStreetRealTimeMarketDataForecasting",
+evalDataset = RowSamplerSequence(data_type='eval', path="../JaneStreetRealTimeMarketDataForecasting",
                                  start_date=1580, end_date=1699, out_size=out_size, in_size=in_size, device=device,
                                  collect_data_at_loading=False, normalize_features=False, rows_to_sample=17)
 
