@@ -3,7 +3,6 @@ import numpy as np
 import torch
 import matplotlib
 from matplotlib import pyplot as plt
-matplotlib.use('TkAgg')
 from Utillity.LossFunctions import r2_score, weighted_mse
 from scipy.stats import linregress
 

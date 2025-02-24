@@ -16,8 +16,10 @@ class GPULoaderResponderLag(GPULoaderGeneral):
 
         batch_indexes = self._get_batch_indexes()
 
+        responder_indexes = torch.arange(21) + batch_indexes.unsqueeze(-1) - 40
+
         X = self.dataset.get_features(batch_indexes)
-        X = torch.cat((X, self.dataset.data[batch_indexes - 20, 85].unsqueeze(-1)), dim=1)
+        X = torch.cat((X, self.dataset.data[responder_indexes, 85]), dim=1)
         Y = self.dataset.get_responders(batch_indexes)
         temporal = self.dataset.get_temporal(batch_indexes)
         weights = self.dataset.get_weights(batch_indexes).unsqueeze(-1)
@@ -148,10 +150,12 @@ class GPUOnlineCacheLoaderSequential(GPULoaderGeneral):
 
         self.added_indices = 0
         self.nu_symbols = 0
+        self.last_nu_symbols = 0
 
         self.day_cache = torch.empty([0], device=device)
         self.start_index = self.nu_rows
 
+        self.first_pass = True
 
     def add_data(self, data):
         if data[0, 90] == 0:
@@ -162,17 +166,27 @@ class GPUOnlineCacheLoaderSequential(GPULoaderGeneral):
 
     def new_day_reset(self, data):
         self.added_indices = 0
+        self.last_nu_symbols = self.nu_symbols
         self.nu_symbols = data.shape[0]
-        if self.start_index == self.nu_rows:
-            self.start_index = self.start_index - self.nu_symbols * 968
-        self.dataset.data = torch.cat((self.dataset.data, self.day_cache.clone()), dim=0)
+        self.start_index = self.nu_rows
+
+        if self.first_pass:
+            self.last_nu_symbols = self.nu_symbols
+            self.day_cache = self.dataset.data[-data.shape[0] * 968:]
+            self.first_pass = False
+            self.dataset.data = torch.cat((self.dataset.data, self.day_cache.clone()), dim=0)
+        else:
+            self.dataset.data = torch.cat((self.dataset.data[:self.nu_rows], self.day_cache.clone()), dim=0)
+
         self.day_cache = torch.zeros((968 * data.shape[0], data.shape[1]), device=self.device)
 
     def get_batch(self):
-        batch_indexes = torch.randint(low=0, high=self.nu_rows, size=((self.batch_size - self.nu_symbols),))
-        new_data_indexes = torch.arange(self.start_index, self.start_index + self.nu_symbols)
-        self.start_index += self.nu_symbols
+        batch_indexes = torch.randint(low=0, high=self.nu_rows, size=((self.batch_size - self.last_nu_symbols),))
+        new_data_indexes = torch.arange(self.start_index, self.start_index + self.last_nu_symbols)
+        self.start_index += self.last_nu_symbols
 
+        if self.dataset.data.shape[0] < self.start_index:
+            a=2
         batch_indexes = torch.cat((batch_indexes, new_data_indexes), dim=0)
 
         data = self.dataset.get_all(batch_indexes)

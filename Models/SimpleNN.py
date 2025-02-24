@@ -29,12 +29,12 @@ class SimpleNN(nn.Module):
         layers = []
 
         if batch_norm:
-            layers.append(nn.BatchNorm1d(self.input_size))
+            layers.append(nn.BatchNorm1d(self.input_size, momentum=0.001))
 
         layers.append(GaussianNoise(std=noise))
 
         if batch_norm:
-            layers.append(nn.BatchNorm1d(self.input_size))
+            layers.append(nn.BatchNorm1d(self.input_size, momentum=0.001))
 
         # Input layer
         layers.append(nn.Linear(self.input_size, hidden_dim))

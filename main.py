@@ -4,7 +4,7 @@ from ModelTest.rnnTest import rnn_test
 
 
 def main():
-    nn_test_lag_responder_mapping()
+    nn_test_gpu()
 
 if __name__ == '__main__':
     main()
